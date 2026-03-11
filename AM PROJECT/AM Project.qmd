@@ -1,0 +1,643 @@
+---
+title: "AM Project"
+format: html
+---
+
+# Preamble
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(here)
+library(vroom)
+library(readr)
+library(dplyr)
+library(lubridate)
+```
+
+```{r}
+i_am("AM PROJECT.Rproj")
+```
+
+# Construction of singular datasets
+
+## CPI (2008=100)
+
+```{r}
+cpi_df_full <- vroom(
+  "Data/CPI.csv",
+  show_col_types = FALSE
+) |>
+  rename(Month = observation_date, CPI = CPIAUCSL_NBD20080101) |>
+  mutate(
+    Month = as.Date(Month),
+    CPI = as.numeric(CPI)
+  ) |>
+  arrange(Month) |>
+  mutate(
+    CPI = ifelse(is.na(CPI), (lag(CPI) + lead(CPI)) / 2, CPI)
+  ) 
+
+start_month <- min(cpi_df_full$Month)
+end_month <- max(cpi_df_full$Month)
+
+expected_months <- seq(start_month, end_month, by = "month")
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = nrow(cpi_df_full),
+  n_months_expected = length(expected_months),
+  coverage_ratio = nrow(cpi_df_full) / length(expected_months)
+)
+
+stats
+
+missing_months <- setdiff(expected_months, cpi_df_full$Month)
+
+missing_months
+
+ggplot(cpi_df_full, aes(x = Month, y = CPI)) +
+  geom_line() +
+  theme_minimal()
+```
+
+
+## Production Dataset
+
+The production dataset is sourced from the U.S. Energy Information Administration (EIA) and reports world crude oil production including lease condensate, measured in million barrels per day. The data are provided at monthly frequency and represent aggregate global production levels as compiled by the EIA. Source: https://www.eia.gov/international/data/world
+
+```{r}
+prod_df_full <- vroom(
+  "Data/Crude_Oil_Including_Lease_Condensate_Production.csv",
+  col_names = FALSE,
+  col_types = cols(.default = col_character()),
+  show_col_types = FALSE
+)
+
+prod_df_full <- tibble(
+  Month = as.Date(gsub("^X", "", unlist(prod_df_full[1, ])), format = "%Y-%m-%d"),
+  Production = as.numeric(gsub(",", ".", unlist(prod_df_full[2, ])))
+) |>
+  arrange(Month) |>
+  mutate(
+    dprod = (log(Production) - lag(log(Production)))
+  ) |>
+  select(Month, dprod) |>
+  drop_na()
+
+start_month <- min(prod_df_full$Month)
+end_month <- max(prod_df_full$Month)
+
+expected_months <- seq(start_month, end_month, by = "month")
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = nrow(prod_df_full),
+  n_months_expected = length(expected_months),
+  coverage_ratio = nrow(prod_df_full) / length(expected_months)
+)
+
+stats
+
+missing_months <- setdiff(expected_months, prod_df_full$Month)
+
+missing_months
+
+ggplot(prod_df_full, aes(x = Month, y = dprod)) +
+  geom_line() +
+  theme_minimal()
+
+```
+
+## Real Economic Activity
+
+The real economic activity (REA) measure is obtained from the Federal Reserve Bank of Dallas. This index is the global real economic activity indicator originally proposed by Kilian and is constructed using dry bulk shipping freight rates to capture fluctuations in global demand for industrial commodities. The series used in this analysis corresponds to the updated version released in 2019, which incorporates methodological refinements and data revisions discussed in Kilian (2019). Sources: https://www.dallasfed.org/research/igrea ; https://www.sciencedirect.com/science/article/abs/pii/S0165176519300746?via%3Dihub
+
+
+```{r}
+rea_df_full <- vroom(
+  "Data/Real_Economic_Activity_Index.csv",
+  locale = locale(decimal_mark = ","),
+  show_col_types = FALSE
+) |>
+  rename(Month = 1, rea = 2) |>
+  mutate(
+    Month = as.Date(Month),
+    rea = as.numeric(rea)
+  ) |>
+  select(Month, rea)|>drop_na()
+
+start_month <- min(rea_df_full$Month)
+end_month   <- max(rea_df_full$Month)
+
+n_obs <- nrow(rea_df_full)
+n_expected <- length(seq(start_month, end_month, by = "month"))
+coverage <- n_obs / n_expected
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = n_obs,
+  n_months_expected = n_expected,
+  coverage_ratio = coverage
+)
+
+stats
+
+ggplot(rea_df_full, aes(x = Month, y = rea)) +
+  geom_line() +
+  theme_minimal()
+```
+
+## (Real) Price of Crude Oil
+
+The real price of crude oil is constructed using the refiner acquisition cost of imported crude oil, as reported by the U.S. Energy Information Administration (EIA). This nominal price series is deflated using the U.S. Consumer Price Index (CPI, 2008 = 100) to obtain a measure of the real price of crude oil. The resulting series reflects inflation-adjusted movements in crude oil prices faced by U.S. refiners. Sources: https://www.eia.gov/dnav/pet/pet_pri_rac2_dcu_nus_m.htm ; https://fred.stlouisfed.org/series/CPIAUCSL
+```{r}
+price_df_full <- vroom(
+  "Data/U.S._Crude_Oil_Imported_Acquisition_Cost_by_Refiners.csv",
+  delim = ";",
+  col_names = FALSE,
+  locale = locale(decimal_mark = ","),
+  show_col_types = FALSE
+)|>
+  rename(
+    Month = X1,
+    Price = X2
+  ) |>
+  mutate(
+    Month = as.Date(Month),
+    Price = as.numeric(Price)
+  ) |>arrange(Month)|>
+  left_join(cpi_df_full, by = "Month") |>
+  mutate(
+    rpo =log((Price / CPI))
+  ) |>
+  select(Month, rpo) |>
+  drop_na()
+
+start_month <- min(price_df_full$Month)
+end_month   <- max(price_df_full$Month)
+
+n_obs <- nrow(price_df_full)
+n_expected <- length(seq(start_month, end_month, by = "month"))
+coverage <- n_obs / n_expected
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = n_obs,
+  n_months_expected = n_expected,
+  coverage_ratio = coverage
+)
+
+stats
+
+ggplot(price_df_full, aes(x = Month, y = rpo)) +
+  geom_line() +
+  theme_minimal()
+```
+
+## (Real) WTI Price
+
+```{r}
+wti_df_full <- vroom(
+  "Data/WTI_daily.csv",
+  locale = locale(decimal_mark = ","),
+  show_col_types = FALSE
+) |>
+  rename(Month = month)
+
+wti_df_full <- wti_df_full |>
+  mutate(Month = as.Date(Month)) |>
+  mutate(ym = format(Month, "%Y-%m")) |>
+  group_by(ym) |>
+  filter(Month == max(Month)) |>
+  ungroup() |>
+  mutate(Month = as.Date(paste0(ym, "-01"))) |>
+  select(-ym)
+
+wti_df_full <- wti_df_full |>
+  left_join(cpi_df_full, by = "Month") |>
+  mutate(
+    wti_real = log(WTI_day / CPI)
+  )|>select(Month, wti_real)
+
+wti_df_full <- wti_df_full |>
+  arrange(Month) |>
+  mutate(
+    wti_real = if_else(
+      is.na(wti_real),
+      (lag(wti_real) + lead(wti_real)) / 2,
+      wti_real
+    )
+  )
+
+start_month <- min(wti_df_full$Month)
+end_month   <- max(wti_df_full$Month)
+
+n_obs <- nrow(wti_df_full)
+n_expected <- length(seq(start_month, end_month, by = "month"))
+coverage <- n_obs / n_expected
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = n_obs,
+  n_months_expected = n_expected,
+  coverage_ratio = coverage
+)
+
+stats
+
+ggplot(wti_df_full, aes(x = Month, y = wti_real)) +
+  geom_line() +
+  theme_minimal()
+```
+## GDP and CPI
+
+```{r}
+gdp_real_df_full <- vroom(
+  "Data/GDP_Real.csv",
+  col_names = FALSE,
+  delim = ";",
+  locale = locale(decimal_mark = ",")
+)|>
+  rename(
+    Month = X1,
+    gdp_real = X2
+  ) |>
+  mutate(
+    Month = as.Date(Month),
+    gdp_real = as.numeric(gdp_real)
+  )
+
+gdp_real <- gdp_real_df_full |>
+  filter(Month >= as.Date("1974-01-01"))
+
+write.table(
+  gdp_real,
+  file = "MATLAB/Replication_Extended/gdp_extended.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+gdp_real <- gdp_real_df_full |>
+  filter(
+    Month >= as.Date("1974-01-01"),
+    Month < as.Date("2008-01-01")
+  )
+
+write.table(
+  gdp_real,
+  file = "MATLAB/Replication/gdp_replication.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+cpi <- cpi_df_full |>
+  filter(Month >= as.Date("1974-01-01"))
+
+write.table(
+  cpi,
+  file = "MATLAB/Replication_Extended/cpi_extended.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+cpi <- cpi_df_full |>
+  filter(
+    Month >= as.Date("1974-01-01"),
+    Month < as.Date("2008-01-01")
+  )
+
+write.table(
+  cpi,
+  file = "MATLAB/Replication/cpi_replication.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+
+```
+# Merging Datasets
+
+```{r}
+base_dataset_replication <- prod_df_full |>
+  inner_join(rea_df_full, by = "Month") |>
+  inner_join(price_df_full, by = "Month") |>
+  arrange(Month)
+
+start_month <- min(base_dataset_replication$Month)
+end_month   <- max(base_dataset_replication$Month)
+
+n_obs <- nrow(base_dataset_replication)
+n_expected <- length(seq(start_month, end_month, by = "month"))
+coverage <- n_obs / n_expected
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = n_obs,
+  n_months_expected = n_expected,
+  coverage_ratio = coverage
+)
+
+stats
+```
+
+## Replication Datasets
+```{r}
+
+# Extended Dataset (1974.1-2025.9)
+
+kilian_replication <- base_dataset_replication |>
+  select(dprod, rea, rpo)
+
+write.table(
+  kilian_replication,
+  file = "MATLAB/Replication_Extended/kilian_replication_extended.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+# Original Dataset (1974.1-2007.12)
+
+kilian_replication <- base_dataset_replication |>
+  filter(Month < as.Date("2008-01-01")) |>
+  select(dprod, rea, rpo)
+
+write.table(
+  kilian_replication,
+  file = "MATLAB/Replication/kilian_replication.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+# New Dataset (2006.1-2025.9)
+
+kilian_replication_2006_2025 <- base_dataset_replication |>
+  filter(Month >= as.Date("2006-01-01")) |>
+  select(dprod, rea, rpo)
+
+write.table(
+  kilian_replication_2006_2025,
+  file = "MATLAB/Replication_2006_2025/kilian_replication_2006_2025.txt",
+  sep = "\t",
+  row.names = FALSE,
+  col.names = FALSE
+)
+
+```
+
+### Kilian Original Datset
+
+```{r}
+data_kilian_original <- read_table(
+  "Data/Original_Kilian_Dataset.txt",
+  col_names = FALSE,
+  col_types = cols(.default = col_double())
+)
+
+n_obs <- nrow(data_kilian_original)
+
+start_date <- as.Date("1973-02-01")
+date_seq <- seq(from = start_date, by = "month", length.out = n_obs)
+
+data_kilian_original <- data_kilian_original |>
+  mutate(Month = date_seq) |>
+  select(Month, everything()) |>
+  rename(
+    dProd = X1,
+    REA   = X2,
+    RPO   = X3
+  )
+
+# sanity check (replication check)
+data_kilian_original |>
+  summarise(
+    mean_dProd = mean(dProd),
+    mean_REA   = mean(REA),
+    mean_RPO   = mean(RPO)
+  )
+
+compare <- data_kilian_original |>
+  left_join(base_dataset_replication, by = "Month")
+
+# dProd
+compare |>
+  ggplot(aes(x = Month)) +
+  geom_line(aes(y = dProd), color = "green") +
+  geom_line(aes(y = dprod))
+
+# REA
+compare |>
+  ggplot(aes(x = Month)) +
+  geom_line(aes(y = REA), color = "green") +
+  geom_line(aes(y = rea))
+
+# RPO
+compare |>
+  ggplot(aes(x = Month)) +
+  geom_line(aes(y = RPO), color = "green") +
+  geom_line(aes(y = rpo))
+
+compare_to_export <- compare |>
+  select(Month, dProd, REA, RPO, dprod, rea, rpo)
+
+write.table(
+  compare_to_export,
+  file = "MATLAB/Data/compare.txt",
+  sep = " ",
+  row.names = FALSE,
+  col.names = TRUE,
+  quote = FALSE
+)
+
+```
+
+
+# Extension Dataset
+
+```{r}
+expectation_df_full <- vroom(
+  "Data/Expected_Crude_Oil_Inventories_US.csv",
+  locale = locale(decimal_mark = ","),
+  show_col_types = FALSE
+) |>
+  rename(Month = month) |>
+  mutate(
+    Month = as.Date(Month),
+    across(-Month, ~ log(.))
+  ) |>
+  arrange(Month)
+
+start_month <- min(expectation_df_full$Month)
+end_month   <- max(expectation_df_full$Month)
+
+n_obs <- nrow(expectation_df_full)
+n_expected <- length(seq(start_month, end_month, by = "month"))
+coverage <- n_obs / n_expected
+
+stats <- tibble(
+  start_month = start_month,
+  end_month = end_month,
+  n_months_observed = n_obs,
+  n_months_expected = n_expected,
+  coverage_ratio = coverage
+)
+
+stats
+
+```
+
+## Future Inventories Dataset
+
+```{r}
+svar4_df_full <- base_dataset_replication |>
+  left_join(expectation_df_full, by = "Month") |>
+  arrange(Month) |>
+  filter(Month >= as.Date("2006-01-01"))
+
+ggplot(svar4_df_full, aes(x = Month, y = `6`)) +
+  geom_line()
+
+vars_X <- as.character(1:12)
+
+for (x in vars_X) {
+  write.table(
+    svar4_df_full |>
+      select(dprod, rea,all_of(x), rpo) |>
+      drop_na(),
+    file = file.path(
+      "MATLAB/Extension_Level",
+      paste0("data_expected_inventory_", x, ".txt")
+    ),
+    row.names = FALSE,
+    col.names = FALSE
+  )
+}
+```
+
+## Shock Proxy
+```{r}
+calculate_inventory_shocks <- function(data) {
+  
+  data <- data |> arrange(Month)
+  
+  shock_df <- tibble(Month = data$Month)
+  
+  for (h in 2:11) {
+    
+    col_current <- as.character(h)
+    col_prev    <- as.character(h + 1)
+    
+    if (!(col_current %in% names(data)) || !(col_prev %in% names(data))) next
+    
+    shock_df[[paste0("Shock_Horizon_", h)]] <-
+      data[[col_current]] - lag(data[[col_prev]], 1)
+  }
+  
+  shock_df |> drop_na()
+}
+
+inventory_shocks_final <- calculate_inventory_shocks(expectation_df_full)
+
+```
+
+```{r}
+library(tidyverse)
+
+inventory_shocks_final |>
+  pivot_longer(
+    cols = starts_with("Shock_Horizon"),
+    names_to = "Horizon",
+    values_to = "Shock_Value"
+  ) |>
+  mutate(
+    Horizon = as.numeric(str_extract(Horizon, "\\d+")),
+    Horizon = factor(Horizon, levels = sort(unique(Horizon)))
+  ) |>
+  ggplot(aes(x = Month, y = Shock_Value, color = Horizon, group = Horizon)) +
+  geom_line(linewidth = 0.6, alpha = 0.7) +
+  scale_color_viridis_d(option = "turbo") +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  ) +
+  labs(
+    title = "Inventory Expectation Shocks Across Horizons",
+    subtitle = "Horizons from 2 to 11 months",
+    x = NULL,
+    y = "Shock magnitude",
+    color = "Horizon (months)"
+  )
+
+```
+
+```{r}
+
+var_datasets_list <- list()
+
+for (h in 2:11) {
+  
+  shock_col_name <- paste0("Shock_Horizon_", h)
+  
+  dataset_name <- paste0("data", h)
+  
+
+  temp_dataset <- base_dataset_replication |>
+  
+    inner_join(inventory_shocks_final, by = "Month") |>
+    
+    
+    select(dprod, rea, all_of(shock_col_name), rpo) |>
+     rename(inventory_shock = all_of(shock_col_name)) |> 
+    
+    drop_na()
+  
+  var_datasets_list[[dataset_name]] <- temp_dataset
+  
+  assign(dataset_name, temp_dataset)
+}
+
+
+print(head(data2))
+
+```
+
+
+```{r}
+output_path <- "MATLAB/Extension"
+
+dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
+
+for (name in names(var_datasets_list)) {
+  
+  df_to_save <- var_datasets_list[[name]]
+  
+  filename <- file.path(output_path, paste0(name, ".txt"))
+  
+  write.table(
+    df_to_save,
+    file = filename,
+    sep = " ",
+    row.names = FALSE,
+    col.names = FALSE,
+    quote = FALSE
+  )
+  
+  message("Salvato: ", filename)
+}
+
+```
+
+

@@ -1,0 +1,233 @@
+% FIGURE4.M
+% Historical decomposition: 4-variable SVAR vs 3-variable benchmark
+% Variable ordering (4-var): (dprod, rea, inv_exp, rpo)
+
+clear;
+quadvar;
+
+%% 1. STRUCTURAL DECOMPOSITION (4-VARIABLE MODEL)
+
+IRF_hist = irfvar(A, SIGMA(1:q,1:q), p, t-p-1);
+P = chol(SIGMA(1:q,1:q))';
+Ehat = P \ Uhat(1:q,:);
+
+len   = t - p;
+yhat1 = zeros(len,1);
+yhat2 = zeros(len,1);
+yhat3 = zeros(len,1);
+yhat4 = zeros(len,1);
+
+idx1 = 4;
+idx2 = 8;
+idx3 = 12;
+idx4 = 16;
+
+for i = 1:len
+    yhat1(i) = dot(IRF_hist(idx1,1:i), Ehat(1,i:-1:1));
+    yhat2(i) = dot(IRF_hist(idx2,1:i), Ehat(2,i:-1:1));
+    yhat3(i) = dot(IRF_hist(idx3,1:i), Ehat(3,i:-1:1));
+    yhat4(i) = dot(IRF_hist(idx4,1:i), Ehat(4,i:-1:1));
+end
+
+%% 2. TIME ALIGNMENT
+
+time_plot = time(p+1:p+len);
+
+%% 3. LOAD BENCHMARK (3-VARIABLE) RESULTS
+
+load('results_replication_3var_2006_2025_fig4.mat');
+
+min_len = min(length(yhat1), length(yhat1_rep));
+
+yhat1 = yhat1(1:min_len);
+yhat2 = yhat2(1:min_len);
+yhat3 = yhat3(1:min_len);
+yhat4 = yhat4(1:min_len);
+
+yhat1_rep_cut = yhat1_rep(1:min_len);
+yhat2_rep_cut = yhat2_rep(1:min_len);
+yhat3_rep_cut = yhat3_rep(1:min_len);
+
+time_plot = time_plot(1:min_len);
+
+%% 4. HISTORICAL DECOMPOSITION COMPARISON
+
+ymin = -1.5;
+ymax =  0.5;
+
+figure;
+
+subplot(4,1,1)
+plot(time_plot,yhat1,'b-'); hold on
+plot(time_plot,yhat1_rep_cut,'b:');
+title('Oil Supply Shock Contribution')
+legend('4-variable model','3-variable benchmark','Location','Best')
+axis([time_plot(1) time_plot(end) ymin ymax])
+grid on
+
+subplot(4,1,2)
+plot(time_plot,yhat2,'b-'); hold on
+plot(time_plot,yhat2_rep_cut,'b:');
+title('Aggregate Demand Shock Contribution')
+axis([time_plot(1) time_plot(end) ymin ymax])
+grid on
+
+subplot(4,1,3)
+plot(time_plot,yhat3,'b-');
+title('Oil-specific precautionary demand')
+axis([time_plot(1) time_plot(end) ymin ymax])
+grid on
+
+subplot(4,1,4)
+plot(time_plot,yhat4,'b-'); hold on
+plot(time_plot,yhat3_rep_cut,'b:');
+title('Residual Shock (4-var) vs Oil-Specific Shock (3-var)')
+axis([time_plot(1) time_plot(end) ymin ymax])
+grid on
+
+%% 5. QUANTITATIVE COMPARISON: RESIDUAL SHOCKS (3-VAR vs 4-VAR)
+
+disp('==========================================================');
+disp('QUANTITATIVE COMPARISON: Residual Shocks');
+disp('Benchmark (3-var) vs Extended (4-var)');
+disp('==========================================================');
+
+%% 5.1 Variance comparison (residual shocks)
+
+var_res_3 = var(yhat3_rep_cut);   % Residual (oil-specific) shock - 3-var
+var_res_4 = var(yhat4);           % Residual shock - 4-var
+
+disp(['Variance (3-var residual): ', num2str(var_res_3,'%.4f')]);
+disp(['Variance (4-var residual): ', num2str(var_res_4,'%.4f')]);
+disp(['Variance reduction (%):    ', ...
+      num2str((1 - var_res_4/var_res_3)*100,'%.2f')]);
+disp(' ');
+
+%% 5.2 Absolute cumulative impact (area under the curve)
+
+area_res_3 = sum(abs(yhat3_rep_cut));   % 3-var residual
+area_res_4 = sum(abs(yhat4));           % 4-var residual
+
+disp(['Absolute area (3-var residual): ', num2str(area_res_3,'%.4f')]);
+disp(['Absolute area (4-var residual): ', num2str(area_res_4,'%.4f')]);
+disp(['Area ratio (4-var / 3-var):     ', ...
+      num2str(area_res_4/area_res_3,'%.3f')]);
+disp(' ');
+
+%% 5.3 Correlation between residual shocks
+
+corr_res = corr(yhat3_rep_cut, yhat4);
+disp(['Correlation (3-var vs 4-var residual): ', num2str(corr_res,'%.4f')]);
+disp(' ');
+
+%% 5.4 Relationship between absorbed component and inventory shock
+
+% Difference between old and new residuals:
+% component absorbed by the new channel
+residual_gap = yhat3_rep_cut - yhat4;
+
+corr_gap_inv = corr(residual_gap, yhat3);
+disp(['Correlation (Residual gap vs Inventory shock): ', ...
+      num2str(corr_gap_inv,'%.4f')]);
+
+disp('==========================================================');
+
+%% 5.5 POST-COVID QUANTITATIVE COMPARISON (t >= 2020)
+
+disp('==========================================================');
+disp('POST-COVID QUANTITATIVE COMPARISON (t >= 2020)');
+disp('==========================================================');
+
+idx_postcovid = time_plot >= 2020.0;
+
+%% Variance comparison (post-COVID)
+
+var_res_3_pc = var(yhat3_rep_cut(idx_postcovid));
+var_res_4_pc = var(yhat4(idx_postcovid));
+
+disp(['Variance (3-var residual): ', num2str(var_res_3_pc,'%.4f')]);
+disp(['Variance (4-var residual): ', num2str(var_res_4_pc,'%.4f')]);
+disp(['Variance reduction (%):    ', ...
+      num2str((1 - var_res_4_pc/var_res_3_pc)*100,'%.2f')]);
+disp(' ');
+
+%% Absolute cumulative impact (post-COVID)
+
+area_res_3_pc = sum(abs(yhat3_rep_cut(idx_postcovid)));
+area_res_4_pc = sum(abs(yhat4(idx_postcovid)));
+
+disp(['Absolute area (3-var residual): ', num2str(area_res_3_pc,'%.4f')]);
+disp(['Absolute area (4-var residual): ', num2str(area_res_4_pc,'%.4f')]);
+disp(['Area ratio (4-var / 3-var):     ', ...
+      num2str(area_res_4_pc/area_res_3_pc,'%.3f')]);
+disp(' ');
+
+%% Correlation between residual shocks (post-COVID)
+
+corr_res_pc = corr(yhat3_rep_cut(idx_postcovid), yhat4(idx_postcovid));
+disp(['Correlation (3-var vs 4-var residual): ', num2str(corr_res_pc,'%.4f')]);
+disp(' ');
+
+%% Relationship between absorbed component and inventory shock (post-COVID)
+
+residual_gap_pc = yhat3_rep_cut(idx_postcovid) - yhat4(idx_postcovid);
+corr_gap_inv_pc = corr(residual_gap_pc, yhat3(idx_postcovid));
+
+disp(['Correlation (Residual gap vs Inventory shock): ', ...
+      num2str(corr_gap_inv_pc,'%.4f')]);
+
+disp('==========================================================');
+%% 6. CUMULATIVE EFFECT: RESIDUAL SHOCK (3-VAR vs 4-VAR)
+
+figure;
+
+plot(time_plot, yhat3_rep_cut, 'b:'); hold on
+plot(time_plot, yhat4,        'b-');
+
+legend('3-variable benchmark','4-variable extended','Location','Best')
+axis([time_plot(1) time_plot(end) ymin ymax])
+grid on
+
+%% 5.6 ROBUSTNESS CHECK: SPILLOVER ANALYSIS
+% Verifica se lo shock delle scorte "ruba" potere esplicativo
+% agli shock di Supply e Aggregate Demand, o solo al Residuo.
+
+disp('==========================================================');
+disp('ROBUSTNESS CHECK: Cross-Model Spillover Analysis');
+disp('Checking if Inventory Shock correlates with gaps in other shocks');
+disp('==========================================================');
+
+% Definisco gli shock strutturali dai due modelli (Assicurati che le dimensioni coincidano!)
+% NOTA: Assumo che 'yhat3_matrix_cut' sia la matrice Tx3 del benchmark (sample tagliato)
+% e 'yhat4' sia la matrice Tx4 dell'estensione.
+% Se hai vettori separati, costruisci la matrice così:
+% yhat3_matrix_cut = [shock_supply_3, shock_aggdem_3, shock_res_3];
+
+% 1. Supply Shock Analysis (Colonna 1)
+gap_supply = yhat3_matrix_cut(:,1) - yhat4(:,1);
+corr_gap_supply = corr(gap_supply, yhat4(:,3)); % Correlazione con Inventory Shock (Col 3)
+
+% 2. Aggregate Demand Shock Analysis (Colonna 2)
+gap_aggdem = yhat3_matrix_cut(:,2) - yhat4(:,2);
+corr_gap_aggdem = corr(gap_aggdem, yhat4(:,3)); % Correlazione con Inventory Shock (Col 3)
+
+% 3. Residual Shock Analysis (Colonna 3 del vecchio vs Colonna 4 del nuovo)
+% (Questo è quello che hai già calcolato, lo rimettiamo per confronto)
+gap_residual = yhat3_matrix_cut(:,3) - yhat4(:,4); 
+corr_gap_residual = corr(gap_residual, yhat4(:,3));
+
+% Display Results
+disp(['Corr(Gap Supply, Inventory Shock):     ', num2str(corr_gap_supply, '%.4f')]);
+disp(['Corr(Gap Agg Dem, Inventory Shock):    ', num2str(corr_gap_aggdem, '%.4f')]);
+disp(['Corr(Gap Residual, Inventory Shock):   ', num2str(corr_gap_residual,'%.4f')]);
+
+disp(' ');
+if abs(corr_gap_supply) < 0.2 && abs(corr_gap_aggdem) < 0.2
+    disp('INTERPRETATION: SUCCESS.');
+    disp('The Inventory Shock is orthogonal to the changes in Supply and Agg Demand identification.');
+    disp('It selectively targets the Residual component.');
+else
+    disp('INTERPRETATION: CAUTION.');
+    disp('The Inventory Shock significantly alters the identification of Supply or Agg Demand.');
+end
+disp('==========================================================');
